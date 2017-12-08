@@ -1,0 +1,98 @@
+#!/usr/bin/python
+
+"""
+Takes dimensions from command line.
+Generates 8 bit greyscale images, max_iter = 256.
+Actual pixels are generated in C, multiprocess.
+Improved algorithm.
+Can be called with optional flags:
+    --save                  Saves the image to a file named 
+                            HEIGHTxWIDTH[-N].png
+    --noshow                Doesn't show the image.
+    --override-cores N      Launches N processes. Without the flag 
+                            detects the number of CPUs and uses that.
+    --verbose               Show progress messages.
+"""
+
+import os #os.path.isfile()
+import sys #sys.argv
+import math #math.floor()
+import subprocess #subprocess.Popen() subprocess.PIPE
+import multiprocessing #multiprocessing.cpu_count() 
+from PIL import Image #Image.new()
+
+def plot_mandelbrot(height,width,processes,verbose):
+    #plot_section height width coord1x coord1y coord2x coord2y
+    #The whole set has coord1=-2.5,1.0 coord2=1.0,-1.0
+    procs = []
+    
+    for i in range(1,processes+1):
+        arg_name = './plot_section'
+        arg_height = str(int(math.floor(float(height)/float(processes))))
+        arg_width = str(width)
+        arg_coord1x = "-2.5"
+        arg_coord1y = str(1.0-2.0/float(processes)*(i-1))
+        arg_coord2x = "1.0"
+        arg_coord2y = str(1.0-2.0/float(processes)*i)
+        if i == processes/2+1 and verbose:
+            arg_list = [arg_name,arg_height,arg_width,arg_coord1x,arg_coord1y,arg_coord2x,arg_coord2y,'print']
+        else:
+            arg_list = [arg_name,arg_height,arg_width,arg_coord1x,arg_coord1y,arg_coord2x,arg_coord2y]
+        p = subprocess.Popen(arg_list,stdout=subprocess.PIPE,bufsize=height*width)
+        procs.append(p)
+
+    
+    image = []
+    for p in reversed(procs):
+        out,_ = p.communicate()
+        if verbose:
+            print "A process finished."
+        for c in out:
+            image.append(ord(c))
+    if verbose:
+        print "All processes finished. Building image."
+    return image
+
+
+if __name__ == "__main__":
+    try:
+        x = int(sys.argv[1])
+        y = int(sys.argv[2])
+    except IndexError:
+        exit("call like\n\t{0} height width [flags]".format(sys.argv[0]))
+        
+    save = '--save' in sys.argv[2:]
+    noshow = '--noshow' in sys.argv[2:]
+    override_cores = '--override-cores' in sys.argv[2:]
+    verbose = '--verbose' in sys.argv[2:]
+    
+    if override_cores:
+        i = sys.argv.index('--override-cores')
+        try:
+            ncores = int(sys.argv[i])
+        except ValueError:
+            print "--override-cores flag without specified cores, ignoring"
+            override_cores = False
+        except IndexError:
+            print "--override-cores flag without specified cores, ignoring"
+            override_cores = False
+    if not override_cores:
+        try:
+            ncores = multiprocessing.cpu_count()
+        except NotImplementedError:
+            print "can't detect number of CPUs, using 1 (try using --override-cores flag)"
+            ncores = 1
+        
+    im = Image.new('L',(x,y))
+    l = plot_mandelbrot(y,x,ncores,verbose)
+    im.putdata(l)
+
+    if save:
+        filename = "{0}x{1}".format(sys.argv[1],sys.argv[2])
+        if os.path.isfile(filename+".png"):
+            filename = filename+"-1"
+        while os.path.isfile(filename+".png"):
+            filename = filename[:-1]+str(int(filename[-1])+1)
+        im.save(filename+".png",'PNG')
+    if not noshow:
+        im.show()
